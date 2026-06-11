@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Care Plan Generator (MVP)</title>
+  <style>
+    body { font-family: -apple-system, sans-serif; max-width: 700px; margin: 40px auto; padding: 0 20px; }
+    label { display: block; margin-top: 12px; font-weight: 600; }
+    input { width: 100%; padding: 8px; margin-top: 4px; box-sizing: border-box; }
+    button { margin-top: 20px; padding: 10px 20px; font-size: 16px; cursor: pointer; }
+    #result { margin-top: 30px; white-space: pre-wrap; background: #f4f4f4;
+              padding: 16px; border-radius: 8px; display: none; }
+    #loading { margin-top: 20px; color: #888; display: none; }
+  </style>
+</head>
+<body>
+  <h1>Care Plan Generator</h1>
+  <p style="color:#888">最小 MVP — 同步生成，提交后请耐心等待。</p>
+
+  <!-- 注意：这里没用 <form> 标签，避免页面刷新；用 JS 手动收集数据发请求 -->
+  <label>Patient First Name <input id="patient_first_name" value="William"></label>
+  <label>Patient Last Name <input id="patient_last_name" value="Wilson"></label>
+  <label>MRN <input id="patient_mrn" value="007890"></label>
+  <label>Referring Provider <input id="provider_name" value="Dr. Emily Rodriguez"></label>
+  <label>Provider NPI <input id="provider_npi" value="3456789012"></label>
+  <label>Primary Diagnosis (ICD-10) <input id="primary_diagnosis_code" value="M05.79"></label>
+  <label>Medication Name <input id="medication_name" value="Humira (adalimumab)"></label>
+
+  <button onclick="submitOrder()">Generate Care Plan</button>
+
+  <div id="loading">⏳ 生成中，请稍候…（同步调用，会卡住）</div>
+  <div id="result"></div>
+
+  <script>
+    async function submitOrder() {
+      // 1. 收集表单里所有字段，打包成一个对象
+      const ids = ["patient_first_name", "patient_last_name", "patient_mrn",
+                   "provider_name", "provider_npi", "primary_diagnosis_code",
+                   "medication_name"];
+      const payload = {};
+      ids.forEach(id => payload[id] = document.getElementById(id).value);
+
+      // 2. 显示"加载中"，隐藏旧结果
+      document.getElementById("loading").style.display = "block";
+      document.getElementById("result").style.display = "none";
+
+      // 3. 发 POST 请求。await 会一直等到后端返回（这就是同步的体验）
+      const resp = await fetch("/api/orders/", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify(payload)
+      });
+      const data = await resp.json();
+
+      // 4. 拿到结果，显示出来
+      document.getElementById("loading").style.display = "none";
+      const result = document.getElementById("result");
+      result.style.display = "block";
+      result.textContent = "Order #" + data.id + " (" + data.status + ")\n\n" + data.care_plan;
+    }
+  </script>
+</body>
+</html>
