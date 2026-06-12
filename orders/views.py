@@ -7,11 +7,17 @@
 """
 import json
 import os
+import logging
 import time
 
 from django.http import JsonResponse
 from django.shortcuts import render
 
+logging.basicConfig(
+    level=logging.INFO,                              # 记录 INFO 级别及以上的日志
+    format="%(asctime)s [%(levelname)s] %(message)s",  # 日志格式:时间 [级别] 内容
+)
+logger = logging.getLogger(__name__)                 # 拿到这个文件专属的 logger
 
 # ============================================================
 # 1. "数据库" —— 其实就是一个内存里的字典
@@ -123,9 +129,15 @@ def create_order(request):
 
     # 从请求体里读 JSON 数据（前端发来的表单内容）
     patient_info = json.loads(request.body)
+    logger.info("[1] 收到请求,病人: %s %s",
+                patient_info.get("patient_first_name"),
+                patient_info.get("patient_last_name"))
 
+    logger.info("[2] 开始调用 LLM 生成 care plan...")
     # 调 LLM 生成 care plan —— 这一步会等待
     care_plan_text = generate_care_plan(patient_info)
+
+    logger.info("[3] LLM 返回,care plan 长度: %d 字符", len(care_plan_text))
 
     # 分配订单号，把整个订单存进内存"数据库"
     order_id = _next_id
@@ -137,6 +149,8 @@ def create_order(request):
         "status": "completed",  # MVP 阶段一步到位，直接 completed
     }
 
+    logger.info("[4] 已存为订单 #%d,返回前端", order_id)
+
     # 返回订单号和生成好的 care plan
     return JsonResponse(ORDERS[order_id])
 
@@ -146,7 +160,12 @@ def get_order(request, order_id):
     GET /api/orders/<id>/
     按订单号查结果。
     """
+    logger.info("[GET-1] 收到查询请求,订单 #%d", order_id)
+
     order = ORDERS.get(order_id)
     if order is None:
+        logger.info("[GET-2] 订单 #%d 不存在,返回 404", order_id)
         return JsonResponse({"error": "Order not found"}, status=404)
+
+    logger.info("[GET-3] 找到订单 #%d,返回数据", order_id)
     return JsonResponse(order)
