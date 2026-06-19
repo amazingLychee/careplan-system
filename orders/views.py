@@ -12,6 +12,7 @@ import time
 
 from django.http import JsonResponse
 from django.shortcuts import render
+from orders.models import Patient, Provider, Order, CarePlan
 
 logging.basicConfig(
     level=logging.INFO,                              # 记录 INFO 级别及以上的日志
@@ -20,15 +21,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)                 # 拿到这个文件专属的 logger
 
 # ============================================================
-# 1. "数据库" —— 其实就是一个内存里的字典
-# ============================================================
-# key 是订单号(int)，value 是订单内容(dict)。
-# ⚠️ 缺陷：服务器一重启，所有数据就没了。这正是 Day 3 引入真数据库的理由。
-ORDERS = {}
 
-# 订单号计数器。每来一个新订单就 +1。
-# ⚠️ 缺陷：这种自增方式在多进程/多实例下会冲突，但 MVP 阶段无所谓。
-_next_id = 1
 
 
 # ============================================================
@@ -116,56 +109,90 @@ def index(request):
 def create_order(request):
     """
     POST /api/orders/
-    收到病人信息 → sync 调 LLM 生成 care plan → 存内存 → 返回结果。
+    收到病人信息 → 拆进数据库(病人/医生/订单) → sync 调 LLM → 存 care plan → 返回。
 
-    ⚠️ 因为是 sync，这个函数会卡住 2~20 秒才返回（取决于 mock 还是真 LLM）。
-       用户的浏览器在这期间一直转圈。这个痛点 Day 4 才解决。
+    ⚠️ 还是 sync，会卡住 2~20 秒。Day 4 才改异步。
     """
-    global _next_id
-
-    # 只接受 POST。其他方法直接打回。
     if request.method != "POST":
         return JsonResponse({"error": "Only POST allowed"}, status=405)
 
-    # 从请求体里读 JSON 数据（前端发来的表单内容）
-    patient_info = json.loads(request.body)
+    form_data = json.loads(request.body)
     logger.info("[1] 收到请求,病人: %s %s",
-                patient_info.get("patient_first_name"),
-                patient_info.get("patient_last_name"))
+                form_data.get("patient_first_name"),
+                form_data.get("patient_last_name"))
 
-    logger.info("[2] 开始调用 LLM 生成 care plan...")
-    # 调 LLM 生成 care plan —— 这一步会等待
-    care_plan_text = generate_care_plan(patient_info)
+    # ---- 拆数据进库：和你导入脚本里做的事一模一样 ----
+    # 病人：用 mrn 去重，见过就复用
+    patient, _ = Patient.objects.get_or_create(
+        mrn=str(form_data.get("patient_mrn")),
+        defaults={
+            "first_name": form_data.get("patient_first_name", ""),
+            "last_name": form_data.get("patient_last_name", ""),
+            "date_of_birth": form_data.get("patient_dob") or None,
+        },
+    )
+    # 医生：用 npi 去重
+    provider, _ = Provider.objects.get_or_create(
+        npi=str(form_data.get("provider_npi")),
+        defaults={
+            "name": form_data.get("provider_name", ""),
+            "phone": form_data.get("provider_phone", ""),
+            "fax": form_data.get("provider_fax", ""),
+        },
+    )
+    # 订单：每次都新建
+    order = Order.objects.create(
+        patient=patient,
+        provider=provider,
+        medication_name=form_data.get("medication_name", ""),
+        primary_diagnosis_code=form_data.get("primary_diagnosis_code", ""),
+        additional_diagnoses=form_data.get("additional_diagnoses", ""),
+        medication_history=form_data.get("medication_history", ""),
+        patient_record=form_data.get("patient_record", ""),
+    )
 
-    logger.info("[3] LLM 返回,care plan 长度: %d 字符", len(care_plan_text))
+    logger.info("[2] 订单 #%d 已存库,开始调用 LLM...", order.id)
 
-    # 分配订单号，把整个订单存进内存"数据库"
-    order_id = _next_id
-    _next_id += 1
-    ORDERS[order_id] = {
-        "id": order_id,
-        "patient_info": patient_info,
-        "care_plan": care_plan_text,
-        "status": "completed",  # MVP 阶段一步到位，直接 completed
-    }
+    # ---- 调 LLM(还是 sync，会等)----
+    care_plan_text = generate_care_plan(form_data)
+    logger.info("[3] LLM 返回,长度 %d 字符", len(care_plan_text))
 
-    logger.info("[4] 已存为订单 #%d,返回前端", order_id)
+    # ---- 存 care plan，直接 completed ----
+    care_plan = CarePlan.objects.create(
+        order=order,
+        content=care_plan_text,
+        status="completed",
+    )
 
-    # 返回订单号和生成好的 care plan
-    return JsonResponse(ORDERS[order_id])
+    logger.info("[4] care plan 已存,订单 #%d 完成", order.id)
+
+    # 返回给前端
+    return JsonResponse({
+        "id": order.id,
+        "status": care_plan.status,
+        "care_plan": care_plan.content,
+    })
 
 
 def get_order(request, order_id):
     """
     GET /api/orders/<id>/
-    按订单号查结果。
+    按订单号从数据库查结果。
     """
-    logger.info("[GET-1] 收到查询请求,订单 #%d", order_id)
+    logger.info("[GET-1] 查询订单 #%d", order_id)
 
-    order = ORDERS.get(order_id)
+    # 从数据库查这个订单，查不到返回 None
+    order = Order.objects.filter(id=order_id).first()
     if order is None:
-        logger.info("[GET-2] 订单 #%d 不存在,返回 404", order_id)
+        logger.info("[GET-2] 订单 #%d 不存在,404", order_id)
         return JsonResponse({"error": "Order not found"}, status=404)
 
-    logger.info("[GET-3] 找到订单 #%d,返回数据", order_id)
-    return JsonResponse(order)
+    # order.care_plan 能直接拿到关联的 CarePlan（OneToOne 的反向访问）
+    care_plan = order.care_plan
+    logger.info("[GET-3] 找到订单 #%d", order_id)
+
+    return JsonResponse({
+        "id": order.id,
+        "status": care_plan.status,
+        "care_plan": care_plan.content,
+    })

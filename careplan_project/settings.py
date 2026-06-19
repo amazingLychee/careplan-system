@@ -3,6 +3,7 @@ Django 配置文件（精简版）。
 注意：我们故意不配置数据库，因为今天数据存在内存里。
 """
 from pathlib import Path
+import os
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -17,8 +18,10 @@ ALLOWED_HOSTS = ["*"]
 
 # 注册我们用到的 Django app
 INSTALLED_APPS = [
-    "django.contrib.staticfiles",  # 处理 CSS/JS 等静态文件
-    "orders",                      # 我们自己写的 app
+    "django.contrib.contenttypes",  # ← 加：ORM 基础，migrate 需要
+    "django.contrib.auth",          # ← 加：很多东西依赖它
+    "django.contrib.staticfiles",
+    "orders",
 ]
 
 MIDDLEWARE = [
@@ -41,7 +44,16 @@ TEMPLATES = [
 
 WSGI_APPLICATION = "careplan_project.wsgi.application"
 
-# 关键：没有 DATABASES 配置。今天不碰数据库。
+DATABASES = {
+    "default": {
+        "ENGINE": "django.db.backends.postgresql",
+        "NAME": os.environ.get("POSTGRES_DB"),
+        "USER": os.environ.get("POSTGRES_USER"),
+        "PASSWORD": os.environ.get("POSTGRES_PASSWORD"),
+        "HOST": os.environ.get("POSTGRES_HOST"),     # "db" → compose 里的服务名
+        "PORT": os.environ.get("POSTGRES_PORT"),
+    }
+}
 
 STATIC_URL = "static/"
 
