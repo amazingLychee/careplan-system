@@ -16,6 +16,7 @@ services:
       - POSTGRES_PORT=5432
     depends_on:
       - db                        # 让 db 先启动，web 再启动
+      - redis
 
   # ↓↓↓ 新增的数据库服务 ↓↓↓
   db:
@@ -29,6 +30,11 @@ services:
       - postgres_data:/var/lib/postgresql/data   # 数据存到这，容器重启不丢
     ports:
       - "5432:5432"               # 映射出来，这样你电脑上的 TablePlus 能连进去看
+
+  redis:
+    image: redis:7-alpine        # 用官方 redis 镜像，alpine 是精简版，小
+    ports:
+      - "6379:6379"              # redis 默认端口，映射出来方便你本地用工具连进去看
 
 # 顶层声明那个 volume（持久化数据用）
 volumes:

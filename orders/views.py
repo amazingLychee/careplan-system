@@ -9,6 +9,7 @@ import json
 import os
 import logging
 import time
+import redis
 
 from django.http import JsonResponse
 from django.shortcuts import render
@@ -19,6 +20,7 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(message)s",  # 日志格式:时间 [级别] 内容
 )
 logger = logging.getLogger(__name__)                 # 拿到这个文件专属的 logger
+r = redis.Redis(host="redis", port=6379, db=0)
 
 # ============================================================
 
@@ -153,25 +155,25 @@ def create_order(request):
 
     logger.info("[2] 订单 #%d 已存库,开始调用 LLM...", order.id)
 
-    # ---- 调 LLM(还是 sync，会等)----
-    care_plan_text = generate_care_plan(form_data)
-    logger.info("[3] LLM 返回,长度 %d 字符", len(care_plan_text))
 
-    # ---- 存 care plan，直接 completed ----
+    # ---- 存 care plan，但状态是 pending，内容先空着 ----
+    # 注意:不调 LLM 了! generate_care_plan 这一步整个删掉
     care_plan = CarePlan.objects.create(
         order=order,
-        content=care_plan_text,
-        status="completed",
+        content="",                # ← 还没生成,空着
+        status="pending",          # ← 关键:待处理
     )
 
-    logger.info("[4] care plan 已存,订单 #%d 完成", order.id)
+    # ---- 把 careplan_id 扔进 Redis 队列(我们的"篮子")----
+    r.lpush("careplan_queue", care_plan.id)
+    logger.info("[3] careplan #%d 已入队,立刻返回", care_plan.id)
 
-    # 返回给前端
+    # ---- 立刻返回"收到了",不等 LLM ----
     return JsonResponse({
         "id": order.id,
-        "status": care_plan.status,
-        "care_plan": care_plan.content,
-    })
+        "careplan_id": care_plan.id,
+        "status": "pending",       # ← 告诉前端:收到了,正在处理
+    }, status=201)
 
 
 def get_order(request, order_id):
