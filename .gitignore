@@ -24,3 +24,6 @@ node_modules/
 .idea/
 .vscode/
 *.swp
+
+# ===== Office 临时文件 =====
+~$*
