@@ -36,6 +36,25 @@ services:
     ports:
       - "6379:6379"              # redis 默认端口，映射出来方便你本地用工具连进去看
 
+  worker:
+    build: .
+    command: celery -A orders.tasks worker --loglevel=info
+    volumes:
+      - .:/app
+    environment:
+      - PYTHONPATH=/app
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - USE_MOCK_LLM=${USE_MOCK_LLM:-1}
+      - POSTGRES_DB=careplan
+      - POSTGRES_USER=careplan
+      - POSTGRES_PASSWORD=careplan
+      - POSTGRES_HOST=db
+      - POSTGRES_PORT=5432
+      - DJANGO_SETTINGS_MODULE=careplan_project.settings
+    depends_on:
+      - db
+      - redis
+
 # 顶层声明那个 volume（持久化数据用）
 volumes:
   postgres_data:

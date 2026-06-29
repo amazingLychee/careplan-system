@@ -113,7 +113,6 @@ def create_order(request):
     POST /api/orders/
     收到病人信息 → 拆进数据库(病人/医生/订单) → sync 调 LLM → 存 care plan → 返回。
 
-    ⚠️ 还是 sync，会卡住 2~20 秒。Day 4 才改异步。
     """
     if request.method != "POST":
         return JsonResponse({"error": "Only POST allowed"}, status=405)
@@ -165,7 +164,8 @@ def create_order(request):
     )
 
     # ---- 把 careplan_id 扔进 Redis 队列(我们的"篮子")----
-    r.lpush("careplan_queue", care_plan.id)
+    from orders.tasks import generate_careplan_task
+    generate_careplan_task.delay(care_plan.id)
     logger.info("[3] careplan #%d 已入队,立刻返回", care_plan.id)
 
     # ---- 立刻返回"收到了",不等 LLM ----
