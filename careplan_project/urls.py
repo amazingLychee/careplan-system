@@ -14,4 +14,6 @@ urlpatterns = [
 
     # GET /api/orders/<id>/  → 按订单号查结果
     path("api/orders/<int:order_id>/", views.get_order, name="get_order"),
+
+    path('api/careplan/<int:careplan_id>/status/', views.careplan_status, name='careplan-status'),
 ]

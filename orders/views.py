@@ -47,7 +47,7 @@ def generate_care_plan(patient_info: dict) -> str:
 
 def _mock_llm(patient_info: dict) -> str:
     """假的 LLM：睡 2 秒假装在'思考'，然后返回一段写死的 care plan。"""
-    time.sleep(2)  # 模拟一点点延迟，让你体验"等待"的感觉（真 LLM 是 10-20 秒）
+    time.sleep(10)  # 模拟一点点延迟，让你体验"等待"的感觉（真 LLM 是 10-20 秒）
     name = patient_info.get("patient_first_name", "") + " " + patient_info.get("patient_last_name", "")
     med = patient_info.get("medication_name", "the medication")
     return f"""SPECIALTY PHARMACY CARE PLAN (MOCK)
@@ -198,3 +198,32 @@ def get_order(request, order_id):
         "status": care_plan.status,
         "care_plan": care_plan.content,
     })
+
+def careplan_status(request, careplan_id):
+    """
+    GET /api/careplan/<id>/status/
+    前端轮询这个接口,问"care plan 好了没"。
+    这个接口是【被动】的:前端问一次,它答一次。它自己不知道"3秒"这回事。
+    """
+    logger.info("[STATUS-1] 查询 careplan #%d", careplan_id)
+
+    care_plan = CarePlan.objects.filter(id=careplan_id).first()
+    if care_plan is None:
+        logger.info("[STATUS-2] careplan #%d 不存在,404", careplan_id)
+        return JsonResponse({"error": "CarePlan not found"}, status=404)
+
+    response_data = {
+        "id": care_plan.id,
+        "status": care_plan.status,
+    }
+
+    # 只有 completed 才带内容;pending/processing 时 content 本来就空,没必要传
+    if care_plan.status == "completed":
+        response_data["content"] = care_plan.content
+
+    # failed 只给通用提示,不暴露 LLM 报错堆栈或 PHI(brief 硬性要求)
+    if care_plan.status == "failed":
+        response_data["error_message"] = "生成失败，请重试"
+
+    logger.info("[STATUS-3] careplan #%d 状态: %s", careplan_id, care_plan.status)
+    return JsonResponse(response_data)

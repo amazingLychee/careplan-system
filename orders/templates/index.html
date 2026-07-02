@@ -1,63 +1,120 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>Care Plan Generator (MVP)</title>
-  <style>
-    body { font-family: -apple-system, sans-serif; max-width: 700px; margin: 40px auto; padding: 0 20px; }
-    label { display: block; margin-top: 12px; font-weight: 600; }
-    input { width: 100%; padding: 8px; margin-top: 4px; box-sizing: border-box; }
-    button { margin-top: 20px; padding: 10px 20px; font-size: 16px; cursor: pointer; }
-    #result { margin-top: 30px; white-space: pre-wrap; background: #f4f4f4;
-              padding: 16px; border-radius: 8px; display: none; }
-    #loading { margin-top: 20px; color: #888; display: none; }
-  </style>
+    <meta charset="UTF-8">
+    <title>Care Plan Generator (MVP)</title>
+    <style>
+        body {
+            font-family: -apple-system, sans-serif;
+            max-width: 700px;
+            margin: 40px auto;
+            padding: 0 20px;
+        }
+
+        label {
+            display: block;
+            margin-top: 12px;
+            font-weight: 600;
+        }
+
+        input {
+            width: 100%;
+            padding: 8px;
+            margin-top: 4px;
+            box-sizing: border-box;
+        }
+
+        button {
+            margin-top: 20px;
+            padding: 10px 20px;
+            font-size: 16px;
+            cursor: pointer;
+        }
+
+        #result {
+            margin-top: 30px;
+            white-space: pre-wrap;
+            background: #f4f4f4;
+            padding: 16px;
+            border-radius: 8px;
+            display: none;
+        }
+
+        #loading {
+            margin-top: 20px;
+            color: #888;
+            display: none;
+        }
+    </style>
 </head>
 <body>
-  <h1>Care Plan Generator</h1>
-  <p style="color:#888">最小 MVP — 同步生成，提交后请耐心等待。</p>
+<h1>Care Plan Generator</h1>
+<p style="color:#888">最小 MVP — 同步生成，提交后请耐心等待。</p>
 
-  <!-- 注意：这里没用 <form> 标签，避免页面刷新；用 JS 手动收集数据发请求 -->
-  <label>Patient First Name <input id="patient_first_name" value="William"></label>
-  <label>Patient Last Name <input id="patient_last_name" value="Wilson"></label>
-  <label>MRN <input id="patient_mrn" value="007890"></label>
-  <label>Referring Provider <input id="provider_name" value="Dr. Emily Rodriguez"></label>
-  <label>Provider NPI <input id="provider_npi" value="3456789012"></label>
-  <label>Primary Diagnosis (ICD-10) <input id="primary_diagnosis_code" value="M05.79"></label>
-  <label>Medication Name <input id="medication_name" value="Humira (adalimumab)"></label>
+<!-- 注意：这里没用 <form> 标签，避免页面刷新；用 JS 手动收集数据发请求 -->
+<label>Patient First Name <input id="patient_first_name" value="William"></label>
+<label>Patient Last Name <input id="patient_last_name" value="Wilson"></label>
+<label>MRN <input id="patient_mrn" value="007890"></label>
+<label>Referring Provider <input id="provider_name" value="Dr. Emily Rodriguez"></label>
+<label>Provider NPI <input id="provider_npi" value="3456789012"></label>
+<label>Primary Diagnosis (ICD-10) <input id="primary_diagnosis_code" value="M05.79"></label>
+<label>Medication Name <input id="medication_name" value="Humira (adalimumab)"></label>
 
-  <button onclick="submitOrder()">Generate Care Plan</button>
+<button onclick="submitOrder()">Generate Care Plan</button>
 
-  <div id="loading">⏳ 生成中，请稍候…（同步调用，会卡住）</div>
-  <div id="result"></div>
+<div id="loading">⏳ 生成中，请稍候…（同步调用，会卡住）</div>
+<div id="result"></div>
 
-  <script>
+<script>
     async function submitOrder() {
-      // 1. 收集表单里所有字段，打包成一个对象
-      const ids = ["patient_first_name", "patient_last_name", "patient_mrn",
-                   "provider_name", "provider_npi", "primary_diagnosis_code",
-                   "medication_name"];
-      const payload = {};
-      ids.forEach(id => payload[id] = document.getElementById(id).value);
+        // ---- 阶段一:提交 ----
+        const ids = ["patient_first_name", "patient_last_name", "patient_mrn",
+            "provider_name", "provider_npi", "primary_diagnosis_code",
+            "medication_name"];
+        const payload = {};
+        ids.forEach(id => payload[id] = document.getElementById(id).value);
 
-      // 2. 显示"加载中"，隐藏旧结果
-      document.getElementById("loading").style.display = "block";
-      document.getElementById("result").style.display = "none";
+        document.getElementById("loading").style.display = "block";
+        document.getElementById("result").style.display = "none";
 
-      // 3. 发 POST 请求。await 会一直等到后端返回（这就是同步的体验）
-      const resp = await fetch("/api/orders/", {
-        method: "POST",
-        headers: {"Content-Type": "application/json"},
-        body: JSON.stringify(payload)
-      });
-      const data = await resp.json();
+        const resp = await fetch("/api/orders/", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify(payload)
+        });
+        const data = await resp.json();
 
-      // 4. 拿到结果，显示出来
-      document.getElementById("loading").style.display = "none";
-      const result = document.getElementById("result");
-      result.style.display = "block";
-      result.textContent = "Order #" + data.id + " (" + data.status + ")\n\n" + data.care_plan;
+        // 关键:POST 只拿到 careplan_id,care plan 还没生成
+        // 不再直接显示结果,而是拿 careplan_id 去【轮询】
+        const careplanId = data.careplan_id;
+        pollStatus(careplanId);   // ← 进入阶段二
     }
-  </script>
+
+    // ---- 阶段二:轮询 ----
+    function pollStatus(careplanId) {
+        // setInterval:每 3000 毫秒(3秒)执行一次里面的函数
+        const intervalId = setInterval(async () => {
+            const resp = await fetch(`/api/careplan/${careplanId}/status/`);
+            const data = await resp.json();
+
+            console.log("轮询一次,当前状态:", data.status);  // 打开浏览器控制台能看到每次轮询
+
+            if (data.status === "completed") {
+                clearInterval(intervalId);   // 关键:停止轮询,不然会一直问下去
+                document.getElementById("loading").style.display = "none";
+                const result = document.getElementById("result");
+                result.style.display = "block";
+                result.textContent = data.content;   // 注意:status 接口里叫 content,不是 care_plan
+            } else if (data.status === "failed") {
+                clearInterval(intervalId);   // 失败也要停止
+                document.getElementById("loading").style.display = "none";
+                const result = document.getElementById("result");
+                result.style.display = "block";
+                result.textContent = "❌ " + data.error_message;
+            }
+            // 如果还是 pending / processing,什么都不做,等 3 秒后再问一次
+        }, 3000);
+    }
+</script>
 </body>
 </html>
